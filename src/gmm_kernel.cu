@@ -85,46 +85,49 @@ __global__ void p_kernel_old(float *likelihood, float *data, float *means,
  *  Multiply the vector X for the inverse covariance matrix S^-1 and for the X',
  *  for the calculation of g(x) function
  */
-__global__ void mul(DeviceData d, const unsigned char DT_N, const unsigned int DB_N, int shared_a, int shared_b) {
-	extern __shared__ float *shared;
-	float *cache1 = &shared[0];
-	float *cache2 = &shared[shared_a]; //4 * DT_N * sizeof(float)];
-	float *matrix = &shared[shared_b]; // 4 * 16 * sizeof(float)];
+__global__ void mul(DeviceData d, const unsigned char DT_N,
+		const unsigned int DB_N) {
 
-	/*
-	__shared__ float cache1[4][DT_N];
-	__shared__ float cache2[4][16];
-	__shared__ float matrix[4][DT_N][DT_N];
-	*/
+	int pt_a = DT_N * blockDim.y;
+	int pt_b = pt_a + blockDim.x * blockDim.y;
+
+	extern __shared__ float shared[];
+	float *cache1 = &shared[0];
+	float *cache2 = &shared[pt_a];
+	float *matrix = &shared[pt_b];
 
 	int sampleIdx = threadIdx.y + blockIdx.x * blockDim.y;
 	int gausIdx = blockIdx.y;
 	int tidy = threadIdx.y; // Which data position of block
 	int tidx = threadIdx.x; // which component of the data
 
+	// loading matrix
+	int lineId = threadIdx.y;
+	while (lineId < DT_N && tidx < DT_N) {
+		matrix[lineId * DT_N + tidx] = d.inv_covariance_matrices[(gausIdx
+				* (DT_N * DT_N)) + (lineId * DT_N + tidx)];
+		lineId += blockDim.y;
+	}
+	__syncthreads();
+
 	while (sampleIdx < DB_N) {
 		//Initializing cache 2 (for reduction)
-		cache2[tidy][tidx] = 0;
+		cache2[tidy * blockDim.x + tidx] = 0;
 
 		if (tidx < DT_N) {
 			// loading sample on the shared memory
-			cache1[tidy][tidx] = d.samples[tidx + sampleIdx * DT_N];
+			cache1[tidy * DT_N + tidx] = d.samples[tidx + sampleIdx * DT_N];
 			// subtracting the mean on the shared memory
-			cache1[tidy][tidx] -= d.means[tidx + gausIdx * DT_N];
-
-			// loading inverse covariance matrix
-			for (int i = 0; i < DT_N; i++)
-				matrix[tidy][tidx][i] =
-						d.inv_covariance_matrices[(gausIdx * (DT_N * DT_N))
-								+ (tidx * DT_N + i)];
+			cache1[tidy * DT_N + tidx] -= d.means[tidx + gausIdx * DT_N];
 
 			__syncthreads();
 
 			// calculating (x - u) * S^-1
 			for (int i = 0; i < DT_N; i++)
-				cache2[tidy][tidx] += cache1[tidy][i] * matrix[tidy][i][tidx];
+				cache2[tidy * blockDim.x + tidx] += cache1[tidy * DT_N + i]
+						* matrix[i * DT_N + tidx];
 
-			cache2[tidy][tidx] *= cache1[tidy][tidx];
+			cache2[tidy * blockDim.x + tidx] *= cache1[tidy * DT_N + tidx];
 		}
 
 		__syncthreads();
@@ -134,7 +137,8 @@ __global__ void mul(DeviceData d, const unsigned char DT_N, const unsigned int D
 		int i = (blockDim.x / 2);
 		while (i != 0) {
 			if (tidx < i) {
-				cache2[tidy][tidx] += cache2[tidy][tidx + i];
+				cache2[tidy * blockDim.x + tidx] += cache2[tidy * blockDim.x
+						+ tidx + i];
 				// Waiting all threads accomplish its sum
 				__syncthreads();
 			}
@@ -143,7 +147,8 @@ __global__ void mul(DeviceData d, const unsigned char DT_N, const unsigned int D
 
 		// Stores the result value in the likelihood matrix
 		if (tidx == 0)
-			d.likelihood_matrix[gausIdx * DB_N + sampleIdx] = cache2[tidy][0];
+			d.likelihood_matrix[gausIdx * DB_N + sampleIdx] = cache2[tidy
+					* blockDim.x];
 
 		sampleIdx += gridDim.x * blockDim.y;
 	}
@@ -196,25 +201,22 @@ void gmm(DeviceData d_data, ofstream *myfile, double *timeTotal,
 
 	dim3 dimGrid(1, GMM_SIZE, 1);
 	dim3 dimBlock(16, 4, 1);
-
-	dim3 dimGrid2(4, GMM_SIZE, 1);
-	dim3 dimBlock2(8, 8, 1);
-
-//	dim3 dimGrid3(2048, GMM_SIZE);
-
 	cudaDeviceSynchronize();
 	cudaEventRecord(start_T, 0);
 	cudaEventRecord(start, 0);
-	int count_a = 4 * DATA_SIZE * sizeof(float);
-	int count_b = 4 * 16 * sizeof(float);
-	int shared_size = (4 * DATA_SIZE * DATA_SIZE * sizeof(float) ) + count_a + count_b;
-	mul<<<dimGrid, dimBlock, shared_size>>>(d_data, DATA_SIZE, DB_SIZE, count_a,count_b);
+	int count_a = 4 * DATA_SIZE;
+	int count_b = 4 * 16;
+	int shared_size = (DATA_SIZE * DATA_SIZE) + count_a + count_b;
+	mul<<<dimGrid, dimBlock, shared_size * sizeof(float)>>>(d_data, DATA_SIZE,
+			DB_SIZE);
 	cudaDeviceSynchronize();
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&duration, start, stop);
 	*myfile << "mul , " << duration << "\n";
 
+    dim3 dimGrid2(4, GMM_SIZE, 1);
+	dim3 dimBlock2(8, 8, 1);
 	cudaDeviceSynchronize();
 	cudaEventRecord(start, 0);
 	p_kernel<<<dimGrid2, dimBlock2>>>(d_data);
