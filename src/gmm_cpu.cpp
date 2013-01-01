@@ -80,6 +80,23 @@ void p_kernel(HostData h) {
 	}
 }
 
+/**
+ *              <<< SECOND PHASE OF ALGORITHM >>>
+ * Normalizes all the likelihoods values for each sample. Each block thread
+ * has K threads (K = number of gaussianas), that works collaboratively
+ * to normalize all the likelihoods from a sample.
+ */
+void pn_kernel(HostData h){
+
+    for (int i=0; i < DB_SIZE; i++){
+        float sum = 0;
+        for (int j=0; j < GMM_SIZE; j++)
+            sum += h.likelihood_matrix[j * DB_SIZE + i];
+        for (int j=0; j < GMM_SIZE; j++)
+            h.likelihood_matrix[j * DB_SIZE + i] /= sum;
+    }
+}
+
 void gmmCPU(HostData h_data, double *timer2) {
 
 	clock_t start_d = clock();
@@ -87,6 +104,7 @@ void gmmCPU(HostData h_data, double *timer2) {
 	gxFunction(h_data.samples, h_data.means, h_data.inv_covariance_matrices,
 			h_data.likelihood_matrix);
 	p_kernel(h_data);
+	pn_kernel(h_data);
 
 	clock_t end_d = clock();
 

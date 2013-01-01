@@ -21,6 +21,22 @@ using namespace std;
 // includes, project
 #include "gmm_types.h"
 
+// Utility class used to avoid linker errors with extern
+// unsized shared memory arrays with templated type
+template<class T>
+struct SharedMemory
+{
+	__device__ inline operator T *() {
+		extern __shared__ int __smem[];
+		return (T *) __smem;
+	}
+
+	__device__ inline operator const T *() const {
+		extern __shared__ int __smem[];
+		return (T *) __smem;
+	}
+};
+
 /**
  *  Subtract the vectors X and U, for the calculation of g(x) function
  */
@@ -85,16 +101,17 @@ __global__ void p_kernel_old(float *likelihood, float *data, float *means,
  *  Multiply the vector X for the inverse covariance matrix S^-1 and for the X',
  *  for the calculation of g(x) function
  */
+template <class T>
 __global__ void mul(DeviceData d, const unsigned char DT_N,
 		const unsigned int DB_N) {
 
 	int pt_a = DT_N * blockDim.y;
 	int pt_b = pt_a + blockDim.x * blockDim.y;
 
-	extern __shared__ float shared[];
-	float *cache1 = &shared[0];
-	float *cache2 = &shared[pt_a];
-	float *matrix = &shared[pt_b];
+	T *sdata = SharedMemory<T>();
+	T *cache1 = &sdata[0];
+	T *cache2 = &sdata[pt_a];
+	T *matrix = &sdata[pt_b];
 
 	int sampleIdx = threadIdx.y + blockIdx.x * blockDim.y;
 	int gausIdx = blockIdx.y;
@@ -159,6 +176,7 @@ __global__ void mul(DeviceData d, const unsigned char DT_N,
  * Each thread works with a sample at time, but is able to compute for
  * any numbers of threads, in case that.
  */
+template <class T>
 __global__ void p_kernel(DeviceData d) {
 
 	int sampleIdx = threadIdx.x + threadIdx.y * blockDim.x
@@ -169,10 +187,10 @@ __global__ void p_kernel(DeviceData d) {
 	while (sampleIdx < DB_SIZE) {
 
 		// Calculate the likelihood value
-		float factor_b = -0.5f
+		T factor_b = -0.5f
 				* d.likelihood_matrix[gausIdx * DB_SIZE + sampleIdx];
-		float factor_a = 1 / (d.factor_pi * sqrtf(d.determinants[gausIdx]));
-		float result = (factor_a * __expf(factor_b)) * d.weights[gausIdx];
+		T factor_a = 1 / (d.factor_pi * sqrtf(d.determinants[gausIdx]));
+		T result = (factor_a * __expf(factor_b)) * d.weights[gausIdx];
 
 		d.likelihood_matrix[gausIdx * DB_SIZE + sampleIdx] = result;
 
@@ -184,8 +202,28 @@ __global__ void p_kernel(DeviceData d) {
 /*
  *
  */
-__global__ void pn_kernel(DeviceData d) {
+template<class T>
+__global__ void pn_kernel(DeviceData d, const unsigned char GMM_N,
+		const unsigned int DB_N) {
 
+	unsigned int tidx = threadIdx.x + blockIdx.x * blockDim.x; // sample index
+	T mySum = 0;
+
+	while (tidx < DB_N) {
+
+		// First reduction phase
+		for (int tidy = 0; tidy < GMM_N; tidy++)
+			mySum += d.likelihood_matrix[tidx + tidy * DB_N];
+
+		__syncthreads();
+
+		// Normalize each likelihood value
+		for (int tidy = 0; tidy < GMM_N; tidy++)
+			d.likelihood_matrix[tidx + tidy * DB_N] /= mySum;
+
+		// Retrieve the next data index
+		tidx += gridDim.x * blockDim.x;
+	}
 }
 
 void gmm(DeviceData d_data, ofstream *myfile, double *timeTotal,
@@ -207,7 +245,7 @@ void gmm(DeviceData d_data, ofstream *myfile, double *timeTotal,
 	int count_a = 4 * DATA_SIZE;
 	int count_b = 4 * 16;
 	int shared_size = (DATA_SIZE * DATA_SIZE) + count_a + count_b;
-	mul<<<dimGrid, dimBlock, shared_size * sizeof(float)>>>(d_data, DATA_SIZE,
+	mul<float> <<<dimGrid, dimBlock, shared_size * sizeof(float)>>>(d_data, DATA_SIZE,
 			DB_SIZE);
 	cudaDeviceSynchronize();
 	cudaEventRecord(stop, 0);
@@ -215,20 +253,28 @@ void gmm(DeviceData d_data, ofstream *myfile, double *timeTotal,
 	cudaEventElapsedTime(&duration, start, stop);
 	*myfile << "mul , " << duration << "\n";
 
-    dim3 dimGrid2(4, GMM_SIZE, 1);
-	dim3 dimBlock2(8, 8, 1);
+	dim3 dimGrid2(1, GMM_SIZE, 1);
+	// 128 threads allows an effective occupancy
+	// optimization for a coalesced access to global memory
+	dim3 dimBlock2(128, 1, 1);
 	cudaDeviceSynchronize();
 	cudaEventRecord(start, 0);
-	p_kernel<<<dimGrid2, dimBlock2>>>(d_data);
+	p_kernel<float> <<<dimGrid2, dimBlock2>>>(d_data);
 	cudaDeviceSynchronize();
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&duration, start, stop);
 	*myfile << "p_kernel , " << duration << "\n";
 
-//	p_kernel_old<<<dimGrid3, 1>>>(d_data.likelihood_matrix, d_data.samples, d_data.means,
-//			d_data.inv_covariance_matrices, d_data.determinants, d_data.weights,
-//			d_data.factor_pi);
+	dim3 dimGrid3(2, 1, 1); // 2 = number of multiprocessors
+	cudaDeviceSynchronize();
+	cudaEventRecord(start, 0);
+	pn_kernel<float> <<<dimGrid3, dimBlock2>>>(d_data, GMM_SIZE, DB_SIZE);
+	cudaDeviceSynchronize();
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&duration, start, stop);
+	*myfile << "pn_kernel , " << duration << "\n";
 
 	cudaDeviceSynchronize();
 	cudaEventRecord(stop_T, 0);
