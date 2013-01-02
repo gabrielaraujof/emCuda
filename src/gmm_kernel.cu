@@ -1,11 +1,20 @@
-/* *
- * Copyright 2012.  All rights reserved.
+/*
+ * Copyright 2012. Gabriel Araujo
+ * 
+ * This file is part of EMCuda.
  *
- * Please refer to the author end user license agreement (EULA) associated
- * with this source code for terms and conditions that govern your use of
- * this software. Any use, reproduction, disclosure, or distribution of
- * this software and related documentation outside the terms of the EULA
- * is strictly prohibited.
+ * EMCuda is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * EMCuda is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with EMCuda.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
