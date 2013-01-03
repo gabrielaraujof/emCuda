@@ -19,7 +19,7 @@ Known Issues
 
 License
 -------
-The project is licensed under the General Public License **GPL v.3**. For the complete terms, please see the [License file] (LICENSE).
+The project is licensed under the General Public License **GPL v.3**. For the complete terms, please see the [License file] (emCUDA/blob/master/LICENSE).
 
 
 [1]: http://blogs.nvidia.com/2012/09/what-is-cuda-2/
