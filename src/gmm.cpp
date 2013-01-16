@@ -72,7 +72,8 @@ void readDatabase(float *data) {
 				data[i * DATA_SIZE + j] = valor;
 		}
 	}
-
+	
+	fclose(matriz);
 }
 
 void initializeData(HostData data) {
