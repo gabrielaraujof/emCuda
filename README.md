@@ -20,11 +20,11 @@ These keywords let the developer express massive amounts of parallelism and dire
 TO DO List
 ----------
 
-Please, check the [TO DO file] (emCUDA/blob/master/TODO.md) for a list of suggested features and improvements for this project.
+Please, check the [TO DO file] (TODO.md) for a list of suggested features and improvements for this project.
 
 License
 -------
-The project is licensed under the General Public License **GPL v.3**. For the complete terms, please see the [License file] (emCUDA/blob/master/LICENSE).
+The project is licensed under the General Public License **GPL v.3**. For the complete terms, please see the [License file] (LICENSE).
 
 
 [1]: http://blogs.nvidia.com/2012/09/what-is-cuda-2/
