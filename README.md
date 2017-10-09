@@ -1,5 +1,7 @@
-EMCuda
-======
+EMCuda (DEPRECATED)
+===================
+
+> This project is not longer maintained.
 
 Parallel implementation of Expectation-Maximization algorithm for estimating Gaussian Mixture Models (GMMs) using the NVIDIA CUDA plataform.
 
